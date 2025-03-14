@@ -5,6 +5,7 @@ import pandas as pd
 from sklearn.metrics import mean_squared_error
 from xgboost import XGBRegressor
 
+
 @dataclass
 class datasets:
     train_X: pd.DataFrame
@@ -82,14 +83,12 @@ def run_hparam_search(
                 model_params = {
                     "max_depth": max_depth,
                     "learning_rate": learning_rate,
-                    "n_estimators": n_estimators,
-                    "enable_categorical": True,
+                    "n_estimators": n_estimators
                 }
 
                 model = XGBRegressor(
-                    random_state=0,
-                    **model_params,
-                    enable_categorical=True,
+                    random_state=0, 
+                    **model_params
                 )
 
                 # Train model
