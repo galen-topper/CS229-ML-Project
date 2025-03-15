@@ -56,19 +56,17 @@ def preprocess_features(
                 test_X[feature]
             ]).unique()
             le.fit(all_values)
-            
             # Transform the data
             train_X[feature] = le.transform(train_X[feature])
             valid_X[feature] = le.transform(valid_X[feature])
             test_X[feature] = le.transform(test_X[feature])
-            
             # Store the encoder
             label_encoders[feature] = le
     
-    # Handle missing values
+    # Handle missing values using mean imputation from training set
     train_X = train_X.fillna(train_X.mean())
-    valid_X = valid_X.fillna(train_X.mean())  # Use training mean
-    test_X = test_X.fillna(train_X.mean())  # Use training mean
+    valid_X = valid_X.fillna(train_X.mean()) 
+    test_X = test_X.fillna(train_X.mean())  
     
     return train_X, valid_X, test_X, label_encoders
 
@@ -120,7 +118,7 @@ def train_and_eval_model(
         "test": test_y_pred,
     }
 
-    # Calculate multiple metrics
+    # Calculate metrics
     metrics = {}
     for split in ["train", "valid", "test"]:
         y_true = getattr(ds, f"{split}_y")
@@ -196,7 +194,6 @@ def run_hparam_search(
                                     categorical_features=categorical_features
                                 )
 
-                                # Store results
                                 results.append({
                                     **model_params,
                                     "valid_rmse": metrics["valid_rmse"],
@@ -271,7 +268,6 @@ def plot_feature_importance(feature_importance: Dict[str, float], top_n: int = 2
         feature_importance: Dictionary of feature importance scores
         top_n: Number of top features to show
     """
-    # Convert to DataFrame and sort
     importance_df = pd.DataFrame({
         'Feature': list(feature_importance.keys()),
         'Importance': list(feature_importance.values())
@@ -285,169 +281,3 @@ def plot_feature_importance(feature_importance: Dict[str, float], top_n: int = 2
     plt.xlabel('Feature Importance Score')
     plt.tight_layout()
     plt.show()
-
-def evaluate_linear_regression(
-    ds: datasets,
-    features_to_include: List[str],
-    cv_folds: int = 5,
-    test_size: float = 0.2,
-    random_state: int = 42
-) -> Tuple[Dict[str, List[float]], Dict[str, float], LinearRegression]:
-    """
-    Evaluate linear regression model using k-fold cross validation and final test set.
-    
-    Args:
-        ds: datasets object containing train, validation, and test data
-        features_to_include: list of features to include in training
-        cv_folds: number of cross-validation folds
-        test_size: proportion of data to use for test set
-        random_state: random seed for reproducibility
-    
-    Returns:
-        cv_history: dictionary containing training and validation metrics for each fold
-        test_metrics: dictionary containing final test set metrics
-        final_model: trained linear regression model
-    """
-    # Initialize results storage
-    cv_history = {
-        'train_rmse': [],
-        'train_mae': [],
-        'train_r2': [],
-        'val_rmse': [],
-        'val_mae': [],
-        'val_r2': []
-    }
-    
-    # Combine train and validation sets for cross-validation
-    X_train_full = pd.concat([ds.train_X[features_to_include], ds.valid_X[features_to_include]])
-    y_train_full = pd.concat([ds.train_y, ds.valid_y])
-    
-    # Preprocess features
-    scaler = StandardScaler()
-    X_train_full = pd.DataFrame(scaler.fit_transform(X_train_full), columns=features_to_include)
-    X_test = pd.DataFrame(scaler.transform(ds.test_X[features_to_include]), columns=features_to_include)
-    
-    # Perform k-fold cross validation
-    from sklearn.model_selection import KFold
-    kf = KFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
-    
-    for fold, (train_idx, val_idx) in enumerate(kf.split(X_train_full), 1):
-        # Split data
-        X_train_fold = X_train_full.iloc[train_idx]
-        y_train_fold = y_train_full.iloc[train_idx]
-        X_val_fold = X_train_full.iloc[val_idx]
-        y_val_fold = y_train_full.iloc[val_idx]
-        
-        # Train model
-        model = LinearRegression()
-        model.fit(X_train_fold, y_train_fold)
-        
-        # Make predictions
-        train_pred = model.predict(X_train_fold)
-        val_pred = model.predict(X_val_fold)
-        
-        # Calculate metrics
-        cv_history['train_rmse'].append(np.sqrt(mean_squared_error(y_train_fold, train_pred)))
-        cv_history['train_mae'].append(mean_absolute_error(y_train_fold, train_pred))
-        cv_history['train_r2'].append(r2_score(y_train_fold, train_pred))
-        
-        cv_history['val_rmse'].append(np.sqrt(mean_squared_error(y_val_fold, val_pred)))
-        cv_history['val_mae'].append(mean_absolute_error(y_val_fold, val_pred))
-        cv_history['val_r2'].append(r2_score(y_val_fold, val_pred))
-        
-        print(f"Fold {fold}/{cv_folds}:")
-        print(f"  Train RMSE: {cv_history['train_rmse'][-1]:.4f}")
-        print(f"  Val RMSE: {cv_history['val_rmse'][-1]:.4f}")
-    
-    # Train final model on all training data
-    final_model = LinearRegression()
-    final_model.fit(X_train_full, y_train_full)
-    
-    # Evaluate on test set
-    test_pred = final_model.predict(X_test)
-    test_metrics = {
-        'test_rmse': np.sqrt(mean_squared_error(ds.test_y, test_pred)),
-        'test_mae': mean_absolute_error(ds.test_y, test_pred),
-        'test_r2': r2_score(ds.test_y, test_pred)
-    }
-    
-    return cv_history, test_metrics, final_model
-
-def plot_linear_regression_results(
-    cv_history: Dict[str, List[float]],
-    test_metrics: Dict[str, float]
-):
-    """
-    Plot training and validation metrics across folds, and final test metrics.
-    
-    Args:
-        cv_history: dictionary containing training and validation metrics for each fold
-        test_metrics: dictionary containing final test set metrics
-    """
-    # Create figure with subplots
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-    
-    # Plot RMSE
-    axes[0].plot(range(1, len(cv_history['train_rmse']) + 1), 
-                 cv_history['train_rmse'], 
-                 'bo-', label='Training')
-    axes[0].plot(range(1, len(cv_history['val_rmse']) + 1), 
-                 cv_history['val_rmse'], 
-                 'ro-', label='Validation')
-    axes[0].axhline(y=test_metrics['test_rmse'], color='g', linestyle='--', 
-                    label=f'Test (RMSE={test_metrics["test_rmse"]:.4f})')
-    axes[0].set_xlabel('Fold')
-    axes[0].set_ylabel('RMSE')
-    axes[0].set_title('Root Mean Squared Error')
-    axes[0].legend()
-    axes[0].grid(True)
-    
-    # Plot MAE
-    axes[1].plot(range(1, len(cv_history['train_mae']) + 1), 
-                 cv_history['train_mae'], 
-                 'bo-', label='Training')
-    axes[1].plot(range(1, len(cv_history['val_mae']) + 1), 
-                 cv_history['val_mae'], 
-                 'ro-', label='Validation')
-    axes[1].axhline(y=test_metrics['test_mae'], color='g', linestyle='--', 
-                    label=f'Test (MAE={test_metrics["test_mae"]:.4f})')
-    axes[1].set_xlabel('Fold')
-    axes[1].set_ylabel('MAE')
-    axes[1].set_title('Mean Absolute Error')
-    axes[1].legend()
-    axes[1].grid(True)
-    
-    # Plot R²
-    axes[2].plot(range(1, len(cv_history['train_r2']) + 1), 
-                 cv_history['train_r2'], 
-                 'bo-', label='Training')
-    axes[2].plot(range(1, len(cv_history['val_r2']) + 1), 
-                 cv_history['val_r2'], 
-                 'ro-', label='Validation')
-    axes[2].axhline(y=test_metrics['test_r2'], color='g', linestyle='--', 
-                    label=f'Test (R²={test_metrics["test_r2"]:.4f})')
-    axes[2].set_xlabel('Fold')
-    axes[2].set_ylabel('R²')
-    axes[2].set_title('R-squared Score')
-    axes[2].legend()
-    axes[2].grid(True)
-    
-    plt.tight_layout()
-    plt.show()
-    
-    # Print summary statistics
-    print("\nSummary Statistics:")
-    print("\nTraining Metrics (mean ± std):")
-    print(f"RMSE: {np.mean(cv_history['train_rmse']):.4f} ± {np.std(cv_history['train_rmse']):.4f}")
-    print(f"MAE: {np.mean(cv_history['train_mae']):.4f} ± {np.std(cv_history['train_mae']):.4f}")
-    print(f"R²: {np.mean(cv_history['train_r2']):.4f} ± {np.std(cv_history['train_r2']):.4f}")
-    
-    print("\nValidation Metrics (mean ± std):")
-    print(f"RMSE: {np.mean(cv_history['val_rmse']):.4f} ± {np.std(cv_history['val_rmse']):.4f}")
-    print(f"MAE: {np.mean(cv_history['val_mae']):.4f} ± {np.std(cv_history['val_mae']):.4f}")
-    print(f"R²: {np.mean(cv_history['val_r2']):.4f} ± {np.std(cv_history['val_r2']):.4f}")
-    
-    print("\nTest Metrics:")
-    print(f"RMSE: {test_metrics['test_rmse']:.4f}")
-    print(f"MAE: {test_metrics['test_mae']:.4f}")
-    print(f"R²: {test_metrics['test_r2']:.4f}")
